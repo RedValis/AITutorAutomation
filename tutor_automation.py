@@ -1,6 +1,6 @@
 import time
 import tkinter as tk
-from tkinter import simpledialog
+from tkinter import simpledialog, messagebox
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -51,6 +51,13 @@ def prompt_credentials():
     if not username or not password:
         return None, None
     return username.strip(), password
+
+def show_error(message):
+    root = tk.Tk()
+    root.withdraw()
+    root.attributes("-topmost", True)
+    messagebox.showerror("KU AI Tutor", message, parent=root)
+    root.destroy()
 
 def setup_driver():
     chrome_options = Options()
@@ -132,6 +139,23 @@ def click_practice_exercises(driver):
         return True
     except TimeoutException:
         print("[Timeout waiting for Practice Exercises button]")
+        return False
+
+def open_practice_exercises(driver, course_name):
+    if click_practice_exercises(driver):
+        return True
+
+    print("[Practice Exercises not found on current page, trying course selection]")
+    if select_course(driver, course_name) and click_practice_exercises(driver):
+        return True
+
+    print("[Falling back to direct navigation to Practice Exercises]")
+    try:
+        driver.get(f"{BASE_URL}/student/practice_quiz")
+        time.sleep(2)
+        return True
+    except Exception as e:
+        print(f"[Direct navigation failed: {e}]")
         return False
 
 # ----------- quiz selections -----------
@@ -509,6 +533,7 @@ def run_automation(driver):
 # ----------- Main Loop -----------
 def main():
     driver = None
+    close_browser = True
     
     try:
         print("="*60)
@@ -518,22 +543,27 @@ def main():
         username, password = prompt_credentials()
         if not username or not password:
             print("\n[ERROR: Username and password are required.]")
+            show_error("Username and password are required.")
             return
         
         driver = setup_driver()
         print("[Chrome WebDriver initialized]\n")
         if not login(driver, username, password):
             print("[Login failed. Exiting...]")
+            show_error("Login failed. Please check your credentials.")
+            close_browser = False
             return
-        if not select_course(driver, COURSE_NAME):
-            print(f"[Could not select course '{COURSE_NAME}'. Exiting...]")
-            return
-        if not click_practice_exercises(driver):
+        if not open_practice_exercises(driver, COURSE_NAME):
             print("[Could not navigate to practice exercises. Exiting...]")
+            show_error("Could not open Practice Exercises. The dashboard layout may differ for this account.")
+            close_browser = False
             return
         
         time.sleep(2)
-        run_automation(driver)
+        if not run_automation(driver):
+            show_error("Automation stopped or failed. The browser will stay open for review.")
+            close_browser = False
+            return
         
         print("\n" + "="*60)
         print("[AUTOMATION COMPLETE]")
@@ -541,9 +571,11 @@ def main():
         
     except Exception as e:
         print(f"\n[Fatal error: {e}]")
+        show_error(f"Fatal error: {e}")
+        close_browser = False
     
     finally:
-        if driver:
+        if driver and close_browser:
             print("\n[Closing browser...]")
             driver.quit()
             print("[Browser closed]")
